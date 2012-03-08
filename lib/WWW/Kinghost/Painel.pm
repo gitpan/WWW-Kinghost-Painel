@@ -490,18 +490,21 @@
         sub conectarPGSql()
 	{
             my($self, $hostbanco, $nomebanco, $userbanco, $senhabanco) = @_;
-            my $dsn="DRIVER={PostGreSQL UNICODE}; SERVER=$hostbanco; DATABASE=$nomebanco; UID=$userbanco; PWD=$senhabanco; OPTION=3; set lc_monetary=pt_BR; set lc_numeric=pt_BR; set lc_time=pt_BR; SET datestyle TO POSTGRES, DMY;";
-            return DBI->connect("DBI:ADO:$dsn") or die "problema ao conectar ao pgsql";
+            my $dsn = "DRIVER={PostGreSQL UNICODE}; SERVER=$hostbanco; DATABASE=$nomebanco; UID=$userbanco; PWD=$senhabanco; OPTION=3; set lc_monetary=pt_BR; set lc_numeric=pt_BR; set lc_time=pt_BR; SET datestyle TO POSTGRES, DMY;";
+            my $conexao = DBI->connect("DBI:ADO:$dsn") or die "problema ao conectar ao pgsql";
+            return $conexao;
 	}
 	
 	sub rodaScriptPGSql()
 	{
             my($self, $hostbanco, $nomebanco, $userbanco, $senhabanco, $sql) = @_;
+            
             my $conexao = $self->conectarPGSql( $hostbanco, $nomebanco, $userbanco, $senhabanco );
             my $dbh = $conexao->prepare($sql);
-            $dbh->execute() or $self->erro($conexao->errstr);
+            $dbh->execute() or die $conexao->errstr;
             $dbh->finish;
             $conexao->disconnect;
+            
             my %resposta = (
                 status  => "sucesso",
                 resposta =>  "executado com sucesso",
@@ -652,13 +655,11 @@
                 my $html;
                 my $banco;
                 # migra ftp
-		$mech->post("https://painel2.kinghost.net/mysql.php?id_dominio=$idDominio");
+                $mech->post("https://painel2.kinghost.net/dominio.migra.ftp.php?id_dominio=$idDominio");
 		if($mech->success())
 		{
 			if($mech->status() == 200)
 			{                          
-                            # migra ftp
-                            $mech->post("https://painel2.kinghost.net/dominio.migra.ftp.php?id_dominio=$idDominio");
                             $mech->submit_form(
                             	form_id => "formFTP",
                             	fields      => {
@@ -792,15 +793,13 @@
             {
                 my $html;
                 my $banco;
-                # migra ftp
-		$mech->post("https://painel2.kinghost.net/mysql.php?id_dominio=$idDominio");
+                # novoUserStats
+                $mech->get("https://painel2.kinghost.net/stats.php?id_dominio=$idDominio");
 		if($mech->success())
 		{
 			if($mech->status() == 200)
 			{                          
-                            
-                            # novoUserStats
-                            $mech->get("https://painel2.kinghost.net/stats.php?id_dominio=$idDominio");
+
                             $mech->submit_form(
 				form_id => "formCria",
                             	fields      => {
@@ -916,14 +915,12 @@
                 my $html;
                 my $banco;
                 # novaCaixaEmail
-		$mech->post("https://painel2.kinghost.net/mysql.php?id_dominio=$idDominio");
+		$mech->get("https://painel2.kinghost.net/kingmail.php?id_dominio=$idDominio");
 		if($mech->success())
 		{
 			if($mech->status() == 200)
 			{                          
-                            
-                            # novaCaixaEmail
-                            $mech->get("https://painel2.kinghost.net/kingmail.php?id_dominio=$idDominio");
+
                             $mech->submit_form(
                             form_id => "addCaixa",
                                     fields      => {
@@ -1046,13 +1043,12 @@
                 my $html;
                 my $banco;
                 # editaSenhaCaixaEmail
-		$mech->post("https://painel2.kinghost.net/mysql.php?id_dominio=$idDominio");
+                $mech->get("https://painel2.kinghost.net/kingmail.php?id_dominio=$idDominio");
 		if($mech->success())
 		{
 			if($mech->status() == 200)
 			{                          
-                            # editaSenhaCaixaEmail
-                            $mech->get("https://painel2.kinghost.net/kingmail.php?id_dominio=$idDominio");
+                            
                             $mech->submit_form(
                             form_id => "addCaixa",
                                 fields      => {
@@ -1163,18 +1159,13 @@
             {
                 my $html;
                 my $banco;
-                $mech->post("https://painel2.kinghost.net/mysql.php?id_dominio=$idDominio");
+                # listaCaixasEmail
+                $mech->get("https://painel2.kinghost.net/kingmail.php?id_dominio=$idDominio");
 		if($mech->success())
 		{
 			if($mech->status() == 200)
 			{                          
-                            # listaCaixasEmail
-                            $mech->get("https://painel2.kinghost.net/kingmail.php?id_dominio=$idDominio");	
-                            
-                            if($mech->success())
-                            {
-				if($mech->status() == 200)
-				{
+
                                     $html = $mech->content;
                                     $mech->update_html( $html );
                                     my $tree = HTML::TreeBuilder::XPath->new;
@@ -1232,30 +1223,7 @@
                                     my $json = \%resposta;
                                     my $json_text = to_json($json, { utf8  => 1 });
                                     return $json_text;
-				}
-				elsif($mech->status() == 404)
-                                {
-                                     %resposta = (
-                                                status  => "erro",
-                                                resposta =>  "not found",
-                                                url =>  $mech->uri(),
-                                     );
-                                     my $json = \%resposta;
-                                     my $json_text = to_json($json, { utf8  => 1 });
-                                     return $json_text;
-                                }
-                                else
-                                {
-                                    %resposta = (
-                                                status  => "erro",
-                                                resposta =>  "unknow HTTP error",
-                                                url =>  $mech->uri(),
-                                    );
-                                    my $json = \%resposta;
-                                    my $json_text = to_json($json, { utf8  => 1 });
-                                    return $json_text;
-                                }
-                            }  
+
 			}
 			elsif($mech->status() == 404)
                         {
@@ -1281,6 +1249,170 @@
                         }
 		}
 		# editaSenhaCaixaEmail
+            }
+            else
+            {
+                %resposta = (
+                    status  => "erro",
+                    resposta =>  "efetue login primeiro",
+                );                
+                my $json = \%resposta;
+                my $json_text = to_json($json, { utf8  => 1 });
+                            
+                return $json_text;
+            }
+        }
+        
+        
+        
+        sub checaDisponibilidadeDominioRevenda
+        {
+            my($self, $dominio) = @_;
+            my %resposta;
+            if($statusLogin)
+            {
+                my $html;
+                my $banco;
+                $mech->get("https://painel2.kinghost.net/dominio.lista.php");
+		if($mech->success())
+		{
+			if($mech->status() == 200)
+			{                          
+                                    $html = $mech->content;
+                                    $mech->update_html( $html );
+                                    my $tree = HTML::TreeBuilder::XPath->new;
+                                    $tree->parse( $html );
+                                    my $respostalistaDominios = $tree->findnodes( '//body' )->[0]->as_HTML;
+							
+                                    if(index($respostalistaDominios, $dominio) != -1)
+                                    {
+                                        %resposta = (
+                                            status  => "erro",
+                                            resposta =>  "em uso na kinghost",
+                                        );
+                                    }
+                                    else
+                                    {
+                                        %resposta = (
+                                            status  => "sucesso",
+                                            resposta =>  "liberado",
+                                        )
+                                    }
+                                                      
+                                    
+                                    my $json = \%resposta;
+                                    my $json_text = to_json($json, { utf8  => 1 });
+                                    return $json_text;
+				
+                              
+			}
+			elsif($mech->status() == 404)
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "not found",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+                        else
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "unknow HTTP error",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+		}
+		
+            }
+            else
+            {
+                %resposta = (
+                    status  => "erro",
+                    resposta =>  "efetue login primeiro",
+                );                
+                my $json = \%resposta;
+                my $json_text = to_json($json, { utf8  => 1 });
+                            
+                return $json_text;
+            }
+        }
+        
+        
+        
+        sub pegaServidorTemporario
+        {
+            my($self, $idDominio) = @_;
+            my %resposta;
+            if($statusLogin)
+            {
+                my $html;
+                my $banco;
+                $mech->get("https://painel2.kinghost.net/painel.dominios.php?id_dominio=$idDominio");
+		if($mech->success())
+		{
+			if($mech->status() == 200)
+			{                          
+                                    $html = $mech->content;
+                                    $mech->update_html( $html );
+                                    my $tree = HTML::TreeBuilder::XPath->new;
+                                    $tree->parse( $html );
+                                    my $respostaDominioInfo = $tree->findnodes( '//body' )->[0]->as_HTML;
+                                    
+                                    my @vetTrata = split(/<td id="inf_url_alt">/, $respostaDominioInfo);
+                                    @vetTrata = split(/target="_blank">/, $vetTrata[1]);
+                                    
+                                    @vetTrata = split(/<\/a><\/td>/, $vetTrata[1]);
+                                    
+                                    my $endereco = $vetTrata[0];
+                                    
+                                    
+                                    #<td id="inf_url_alt">
+                                    #&nbsp;<a href="http://web2solutions.voufrades.uni5.net" target="_blank">
+                                    #web2solutions.voufrades.uni5.net
+							
+                                    %resposta = (
+                                            status  => "sucesso",
+                                            resposta =>  "$endereco",
+                                    );
+                                                      
+                                    
+                                    my $json = \%resposta;
+                                    my $json_text = to_json($json, { utf8  => 1 });
+                                    return $json_text;
+				
+                              
+			}
+			elsif($mech->status() == 404)
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "not found",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+                        else
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "unknow HTTP error",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+		}
+		
             }
             else
             {
@@ -1404,7 +1536,19 @@ WWW::Kinghost::Painel - Object for hosting automation using Kinghost (www.kingho
     my $idDominio = "0000000";
     print $painel->listaCaixasEmail( $idDominio );
     
+    
+    # Checa se o domínio ja é cadastrado na revenda
+    my $dominio = "web2solutions.com.br";
+    print $painel->checaDisponibilidadeDominioRevenda( $dominio );
 
+
+    # Pega o endereço provisório do domínio
+    my $idDominio = "0000000";
+    print $painel->pegaServidorTemporario( $idDominio );
+
+    
+    
+=head1 SUMMARY 
 
 =head1 METHODS
 
@@ -1417,6 +1561,7 @@ Loga no painel de controle. Este método deverá ser chamado antes de qualquer o
 Return string
     
     logged, invalid login, not found, unknow HTTP error, connection error
+
 
 =head2 novoCliente
 
@@ -1445,6 +1590,8 @@ Return JSON
     {"resposta":"E-mail em uso","status":"erro"}
     {"resposta":"efetue login primeiro","status":"erro"}
 
+
+
 =head2 novoDominio
 
 Cadastra novo Dominio
@@ -1463,6 +1610,36 @@ Return JSON
     {"dominio":"topjeca.com.br","resposta":"registrado","status":"sucesso","codigo":"291076"}
     {"dominio":"topjeca.com.br","resposta":"dominio ja existe","status":"erro"}
     {"resposta":"efetue login primeiro","status":"erro"}
+    
+
+    
+=head2 checaDisponibilidadeDominioRevenda
+
+Checa se o domínio ja é cadastrado na revenda
+    
+    my $dominio = "web2solutions.com.br";
+    print $painel->checaDisponibilidadeDominioRevenda( $dominio );
+
+Return JSON
+
+    {"resposta":"em uso na kinghost","status":"erro"}
+    {"resposta":"liberado","status":"sucesso"}
+    
+
+
+=head2 pegaServidorTemporario
+
+Pega o endereço provisório do domínio
+    
+    my $idDominio = "0000000";
+    print $painel->pegaServidorTemporario( $idDominio );
+
+Return JSON
+
+    {"resposta":"salamina.dominio.com.br","status":"sucesso"}
+    {"resposta":"error message","status":"erro"}
+    
+
 
 =head2 novoPGSql
 

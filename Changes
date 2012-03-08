@@ -1,0 +1,11 @@
+History log for WWW::Kinghost::Painel
+
+# 0.001 - March 3, 2012
+
+* Namespace Kinghost::Painel updated to WWW::Kinghost::Painel
+
+
+# 0.002 - March 8, 2012
+
+* New checaDisponibilidadeDominioRevenda method
+* New pegaServidorTemporario method
