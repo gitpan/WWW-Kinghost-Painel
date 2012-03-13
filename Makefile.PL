@@ -24,12 +24,13 @@ my %WriteMakefileArgs = (
     "HTML::Entities" => 0,
     "HTML::TreeBuilder::XPath" => 0,
     "JSON" => 0,
+    "Net::FTP" => 0,
     "WWW::Mechanize" => 0,
     "strict" => 0,
     "utf8" => 0,
     "warnings" => 0
   },
-  "VERSION" => "0.02",
+  "VERSION" => "0.03",
   "test" => {
     "TESTS" => ""
   }

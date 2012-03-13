@@ -8,8 +8,10 @@
         use HTML::Entities;
         use JSON;
         use DBI;
+        use Net::FTP;
         
         my $statusLogin;
+        my $statusLoginRegistro;
         my $entitieschars;
         my $mech;
 	
@@ -23,6 +25,7 @@
             $statusLogin = 0;
             $entitieschars = 'ÁÍÓÚÉÄÏÖÜËÀÌÒÙÈÃÕÂÎÔÛÊáíóúéäïöüëàìòùèãõâîôûêÇç';
             $mech = WWW::Mechanize->new;
+            $mech->agent_alias( 'Windows IE 6' );
             
             bless $self, $class;           
             return $self, $class;
@@ -30,13 +33,10 @@
         
         sub erro
 	{
-            my($self, $strErro) = @_;
-            my @veterro=split(/ERRO/, $strErro);
-            my @errvet2=split(/;/, @veterro[1]);
-            @errvet2[0]=~ s/: //g;           
+            my($self, $strErro) = @_;         
             my %resposta = (
                 status  => "erro",
-		resposta =>  @errvet2[0],
+		resposta =>  $strErro,
             );
             my $json = \%resposta;
             my $json_text = to_json($json, { utf8  => 1 });
@@ -785,6 +785,29 @@
             }
         }
         
+        
+        sub deletaArquivoFTP
+        {
+            my($self, $host, $user, $password, $dirTarget, $file) = @_;
+            my %resposta;
+            
+            my $ftp = Net::FTP->new($host, Debug => 0) or $self->erro("impossivel conectar a $host: $@");
+            $ftp->login($user, $password) or die "impossivel logar ", $ftp->message;
+            $ftp->cwd($dirTarget) or die "impossivel mudar de diretorio ", $ftp->message;
+            $ftp->delete( $file ) or die "impossivel excluir arquivo ", $ftp->message;
+            $ftp->quit;
+
+	    my %resposta = (
+	        status  => "sucesso",
+	        resposta =>  "$file excluído com sucesso",
+	        url =>  $mech->uri(),
+	    );
+	    my $json = \%resposta;
+	    my $json_text = to_json($json, { utf8  => 1 });
+	    return $json_text;
+        }
+        
+        
         sub novoUserStats
         {
             my($self, $idDominio, $usuario, $senha) = @_;
@@ -1288,7 +1311,7 @@
                                     {
                                         %resposta = (
                                             status  => "erro",
-                                            resposta =>  "em uso na kinghost",
+                                            resposta =>  "em uso na Revenda",
                                         );
                                     }
                                     else
@@ -1353,7 +1376,6 @@
             if($statusLogin)
             {
                 my $html;
-                my $banco;
                 $mech->get("https://painel2.kinghost.net/painel.dominios.php?id_dominio=$idDominio");
 		if($mech->success())
 		{
@@ -1380,6 +1402,7 @@
                                     %resposta = (
                                             status  => "sucesso",
                                             resposta =>  "$endereco",
+                                            url =>  "$endereco",
                                     );
                                                       
                                     
@@ -1429,6 +1452,130 @@
         
         
         
+        
+        # ==== Registro.br
+        
+        
+        
+        sub transfereDominio
+        {
+            my($self, $ID, $senha, $dominio, $idTec, $dns1, $dns2, $dns3, $dns4) = @_;
+            my %resposta;
+
+            my $html;
+            my $idDominio;
+            my $idCob;
+            
+            if(! defined($dns3))
+            {
+                $dns3 = "";
+            }
+            if(! defined($dns4))
+            {
+               $dns4 = "";
+            }
+
+                
+            $mech->get("https://registro.br/cgi-bin/nicbr/stini");
+            if($mech->success())
+            {
+                if($mech->status() == 200)
+                {
+                    # form loga no registro
+                    $mech->submit_form(
+                            with_fields => {
+                                    handle => $ID, # ID
+                                    passwd => $senha, # senha do ID
+                            }
+                    );
+                    
+                    my @links = $mech->links();
+                    foreach my $link (@links)
+                    {
+                            if($link->text() eq $dominio)
+                            {
+                                    $mech->get("https://registro.br/" . $link->url());
+                                    my @vetId = split(/id\=/, $link->url());
+                                    $idDominio = $vetId[1];
+                            }
+                    }
+                    $html = $mech->content;
+                    $mech->update_html( $html );
+                    my $tree = HTML::TreeBuilder::XPath->new;
+                    $tree->parse( $html );
+                    my $pagina = $tree->findnodes( '//body' )->[0]->as_HTML;
+                    my @vetPag = split(/name\=\"cob\" id\=\"bil\" value\=\"/, $pagina); #"
+                    @vetPag = split(/\"/, $vetPag[1]); #"
+                    $idCob = $vetPag[0];
+                    $mech->submit_form(
+                            form_id => "domainForm",
+                            fields      => {
+                                    id => $idDominio,
+                                    dominio => $dominio,
+                                    tec => $idTec,
+                                    cob => $idCob,
+                                    host1 => $dns1,
+                                    host2 => $dns2,
+                                    host3 => $dns3,
+                                    host4 => $dns4,
+                            }
+                    );
+                    $html = $mech->content;
+                    $mech->update_html( $html );
+                    $tree = HTML::TreeBuilder::XPath->new;
+                    $tree->parse( $html );
+                    $pagina = $tree->findnodes( '//body' )->[0]->as_HTML;
+                    
+                    #contato técnico inválido
+                    if(index($pagina, "contato") != -1 && index($pagina, "cnico") != -1 && index($pagina, "lido") != -1)
+                    {
+                        %resposta = (
+                            status  => "erro",
+                            resposta =>  "ID tecnico invalido",
+                        );
+                     }
+                     else
+                     {
+                         %resposta = (
+                            status  => "sucesso",
+                            resposta =>  "dominio transferido",
+                        );
+                     }
+                    
+                    
+                                                     
+                    my $json = \%resposta;
+                    my $json_text = to_json($json, { utf8  => 1 });
+                    return $json_text;
+		}
+		elsif($mech->status() == 404)
+		{
+		    %resposta = (
+		        status  => "erro",
+		        resposta =>  "not found",
+		        url =>  $mech->uri(),
+		    );
+		    my $json = \%resposta;
+		    my $json_text = to_json($json, { utf8  => 1 });
+		    return $json_text;
+		}
+		else
+		{
+		    %resposta = (
+		        status  => "erro",
+		        resposta =>  "unknow HTTP error",
+		        url =>  $mech->uri(),
+		    );
+		    my $json = \%resposta;
+		    my $json_text = to_json($json, { utf8  => 1 });
+		    return $json_text;
+		}
+            }
+        }     
+        
+        
+        
+        
               
 1;
 
@@ -1438,6 +1585,10 @@ __END__
 =head1 NAME
 
 WWW::Kinghost::Painel - Object for hosting automation using Kinghost (www.kinghost.net) v2 Control Panel
+
+=head1 VERSION
+
+0.03
 
 =head1 SYNOPSIS
   
@@ -1778,6 +1929,56 @@ Return JSON
     {"resposta":"Erro de FTP. Verifique as credenciais de acesso ao FTP ou o diretorio alvo no FTP remoto","status":"erro"}
     {"resposta":"diretorio de origem invalido","status":"erro"}
     {"resposta":"efetue login primeiro","status":"erro"}
+    
+    
+=head2 deletaArquivoFTP
+
+Deleta arquivo no FTP
+    
+    my $host = "ftp.sitedocliente.com.br";
+    my $user = "sitedocliente";
+    my $password = "xxxxx";
+    my $dirTarget = '/www';
+    my $file = "index.htm";
+    print $painel->deletaArquivoFTP( $host, $user, $password, $dirTarget, $file );
+
+Return JSON
+    
+    {"resposta":"Migracao em andamento. Quando a migracao terminar os arquivos estarao em seu site","status":"sucesso"}
+    {"resposta":"Erro de FTP. Verifique as credenciais de acesso ao FTP ou o diretorio alvo no FTP remoto","status":"erro"}
+    {"resposta":"diretorio de origem invalido","status":"erro"}
+    {"resposta":"efetue login primeiro","status":"erro"}
+    
+    
+=head2 transfereDominio
+
+Transfere domínio no Registro.br
+    
+    # ID da Entidade dententora do domínio
+    my $ID = "XXXXX"; 
+    
+    # ID da Entidade dententora do domínio
+    my $senha = "XXXX"; 
+    my $dominio = "topjeca.com.br"; 
+    
+    # Dominio que você deseja transferir
+    my $idTec = "XXXXX"; # ID da entidade que deseja transferir o contato técnico. deixe em branco caso nao queira transferir o contato técnico
+    
+    # servidores DNS para o qual o domínio será transferido. Só é obrigatório o dns1 e dns2
+    my $dns1 = 'dns1.suarevenda.com.br';
+    my $dns2 = 'dns2.suarevenda.com.br';
+    my $dns3 = 'dns3.suarevenda.com.br';
+    my $dns4 = 'dns4.suarevenda.com.br';
+
+    print $painel->transfereDominio( $ID, $senha, $dominio, $idTec, $dns1, $dns2, $dns3, $dns4 );
+
+Return JSON
+    
+    {"resposta":"dominio transferido","status":"sucesso"}
+    {"resposta":"ID tecnico invalido","status":"erro"}
+
+
+
 
 
 =head1 EXAMPLES
