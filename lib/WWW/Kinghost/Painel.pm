@@ -1,6 +1,7 @@
 ﻿package WWW::Kinghost::Painel;
 
-        use strict;
+        use strict qw(vars);
+        use vars qw($VERSION) ;
 	use warnings 'all';
 	use utf8;
         use WWW::Mechanize;
@@ -10,7 +11,10 @@
         use DBI;
         use Net::FTP;
         
+        $VERSION = '0.04' ;
+        
         my $statusLogin;
+        my $statusLoginV1;
         my $statusLoginRegistro;
         my $entitieschars;
         my $mech;
@@ -43,6 +47,20 @@
             print $json_text;
             exit;
 	}
+	
+	sub erroFTP
+	{
+            my($self, $strErro, $ftperror) = @_;         
+            my %resposta = (
+                status  => "erro",
+		resposta =>  $strErro,
+		msgftp =>  $ftperror,
+            );
+            my $json = \%resposta;
+            my $json_text = to_json($json, { utf8  => 1 });
+            return $json_text;
+            exit;
+	}
         
         sub logar
         {
@@ -71,6 +89,56 @@
                             if(index($respostaloga, "abaixo para acessar o Painel de Controle") == -1)
                             {
                                 $statusLogin = 1;
+                                return "logged";
+                            }
+                            else
+                            {
+                                return "invalid login";
+                            }
+                     }
+                     elsif($mech->status() == 404)
+                     {
+                         return "not found";
+                     }
+                     else
+                     {
+                         return "unknow HTTP error";
+                     }
+            }
+            else
+            {
+                return "connection error";
+            }
+        }
+        
+        
+        sub logarV1
+        {
+            my($self, $email, $senha) = @_;
+            my $html;
+            $mech->get("https://painel.kinghost.net/login.php");
+            if($mech->success())
+            {
+                    if($mech->status() == 200)
+                    {
+                            # loga no painel
+                            $mech->submit_form(
+                                    form_id => "formLogin",
+                                    fields      => {
+                                        email => $email,
+                                        senha => $senha,
+                                    }
+                            );
+                            $html = $mech->content;
+                            $mech->update_html( $html );
+                            my $tree = HTML::TreeBuilder::XPath->new;
+                            $tree->parse( $html );
+                            # resposta da tentiva de cadastro
+                            my $respostaloga = $tree->findnodes( '//body' )->[0]->as_HTML;
+                            
+                            if(index($respostaloga, "abaixo para acessar o Painel de Controle") == -1)
+                            {
+                                $statusLoginV1 = 1;
                                 return "logged";
                             }
                             else
@@ -487,6 +555,89 @@
             }
         }
         
+        
+        sub selecionaPgSQL
+        {
+            my($self, $idDominio, $novoservidor) = @_;
+            my %resposta;
+            if($statusLogin)
+            {
+                my $html;
+                my $banco;
+                # seleciona pg
+                
+                $mech->get("https://painel2.kinghost.net/site.pgsql.php?id_dominio=$idDominio");
+                my %hashform = (
+                    acao => 'pgsql',
+                        subacao => "configura_servidor",
+                        id_dominio => $idDominio,
+                        novo_servidor => $novoservidor,
+		);
+		$mech->post("https://painel2.kinghost.net/conectorPainel.php?acao=pgsql&subacao=configura_servidor&id_dominio=$idDominio&novo_servidor=$novoservidor",  \%hashform);	
+		
+		if($mech->status() == 200)
+		{                          
+                    $html = $mech->content;
+                    $mech->update_html( $html );
+                    my $tree = HTML::TreeBuilder::XPath->new;
+                    $tree->parse( $html );
+                    my $paginaSeletor = $tree->findnodes( '//body' )->[0]->as_HTML;				
+                    
+                    if(index($paginaSeletor, "Servidor") != -1 && index($paginaSeletor, "configurado") != -1 && index($paginaSeletor, "sucesso") != -1)
+                    {
+                        %resposta = (
+                            status  => "sucesso",
+                            resposta =>  "servidor selecionado com sucesso",
+                        );
+                    }
+                    else
+                    {
+                        %resposta = (
+                            status  => "erro",
+                            resposta =>  "erro ao selecionar servidor",
+                        );
+                    }
+                    my $json = \%resposta;
+                    my $json_text = to_json($json, { utf8  => 1 });
+                    return $json_text;                           
+		}
+		elsif($mech->status() == 404)
+                {
+                    %resposta = (
+                       status  => "erro",
+                        resposta =>  "not found",
+                        url =>  $mech->uri(),
+                     );
+                     my $json = \%resposta;
+                     my $json_text = to_json($json, { utf8  => 1 });
+                     return $json_text;
+                }
+                else
+                {
+                      %resposta = (
+                        status  => "erro",
+                        resposta =>  "unknow HTTP error",
+                        url =>  $mech->uri(),
+                    );
+                    my $json = \%resposta;
+                    my $json_text = to_json($json, { utf8  => 1 });
+                    return $json_text;
+                }
+		#migra ftp
+            }
+            else
+            {
+                %resposta = (
+                    status  => "erro",
+                    resposta =>  "efetue login primeiro",
+                );                
+                my $json = \%resposta;
+                my $json_text = to_json($json, { utf8  => 1 });
+                            
+                return $json_text;
+            }
+        }
+        
         sub conectarPGSql()
 	{
             my($self, $hostbanco, $nomebanco, $userbanco, $senhabanco) = @_;
@@ -543,6 +694,9 @@
             {
                 my $html;
                 my $banco;
+                
+                $mech->get("https://painel2.kinghost.net/painel.dominios.php?id_dominio=$idDominio");
+                
                 # cria MySQL
 		$mech->post("https://painel2.kinghost.net/mysql.php?id_dominio=$idDominio");
 		if($mech->success())
@@ -800,7 +954,27 @@
 	    my %resposta = (
 	        status  => "sucesso",
 	        resposta =>  "$file excluído com sucesso",
-	        url =>  $mech->uri(),
+	    );
+	    my $json = \%resposta;
+	    my $json_text = to_json($json, { utf8  => 1 });
+	    return $json_text;
+        }
+        
+        sub deletaArquivosFTP
+        {
+            my($self, $host, $user, $password, $dirTarget, @files) = @_;
+            my %resposta;
+            my $ftp = Net::FTP->new($host, Debug => 0) or $self->erroFTP("impossivel conectar a $host:", $@);
+            $ftp->login($user, $password) or $self->erroFTP("impossivel logar ", $ftp->message());
+            $ftp->cwd( $dirTarget) or $self->erroFTP("impossivel mudar de diretorio ", $ftp->message());
+            foreach my $file(@files) 
+            {
+                $ftp->delete( $file ) or $self->erroFTP("impossivel excluir arquivo $file ", $ftp->message());
+            }            
+            $ftp->quit;
+	    my %resposta = (
+	        status  => "sucesso",
+                resposta =>  "Arquivos excluídos com sucesso",
 	    );
 	    my $json = \%resposta;
 	    my $json_text = to_json($json, { utf8  => 1 });
@@ -1365,6 +1539,90 @@
                             
                 return $json_text;
             }
+        }       
+        
+        sub habilitaISAPIRewrite
+        {
+            my($self, $idDominio, $captcha) = @_;
+            my %resposta;
+            if($statusLogin)
+            {
+                my $html;
+                my $banco;
+                $mech->get("https://painel2.kinghost.net/painel.isapi_rewrite.php?id_dominio=$idDominio");
+		$mech->submit_form(
+                    form_id => "configurarISAPIRewrite",
+                    fields      => {
+			acao => 'iis6',
+			subacao => "isapi_rewrite",
+			id_dominio => $idDominio,
+			isapi_rewrite => "On",
+			captcha => $captcha,
+                    }
+		);
+		if($mech->success())
+		{
+			if($mech->status() == 200)
+			{                          
+                            $html = $mech->content;
+                            $mech->update_html( $html );
+                            my $tree = HTML::TreeBuilder::XPath->new;
+                            $tree->parse( $html );
+                            my $paginaISAPI = $tree->findnodes( '//body' )->[0]->as_HTML;										
+                            if(index($paginaISAPI, "Palavra digitada") != -1 && index($paginaISAPI, "por favor tente novamente") != -1)
+                            {
+                                    %resposta = (
+                                        status  => "erro",
+                                        resposta =>  "captcha errada",
+                                    );
+                            }
+                            elsif(index($paginaISAPI, "ISAPI Rewrite ativado com") != -1)#
+                            {
+                                %resposta = (
+                                    status  => "sucesso",
+                                    resposta =>  "ISAPI Rewrite ativado com sucesso",
+                                );
+                            }
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+			}
+			elsif($mech->status() == 404)
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "not found",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+                        else
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "unknow HTTP error",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+		}
+		
+            }
+            else
+            {
+                %resposta = (
+                    status  => "erro",
+                    resposta =>  "efetue login primeiro",
+                );                
+                my $json = \%resposta;
+                my $json_text = to_json($json, { utf8  => 1 });
+                            
+                return $json_text;
+            }
         }
         
         
@@ -1393,18 +1651,12 @@
                                     @vetTrata = split(/<\/a><\/td>/, $vetTrata[1]);
                                     
                                     my $endereco = $vetTrata[0];
-                                    
-                                    
-                                    #<td id="inf_url_alt">
-                                    #&nbsp;<a href="http://web2solutions.voufrades.uni5.net" target="_blank">
-                                    #web2solutions.voufrades.uni5.net
 							
                                     %resposta = (
                                             status  => "sucesso",
                                             resposta =>  "$endereco",
                                             url =>  "$endereco",
-                                    );
-                                                      
+                                    );                                                      
                                     
                                     my $json = \%resposta;
                                     my $json_text = to_json($json, { utf8  => 1 });
@@ -1451,12 +1703,74 @@
         }
         
         
-        
-        
-        # ==== Registro.br
-        
-        
-        
+        sub pegaServidorTemporarioAux
+        {
+            my($self, $idDominio) = @_;
+            my %resposta;
+            if($statusLogin)
+            {
+                my $html;
+                $mech->get("https://painel2.kinghost.net/painel.dominios.php?id_dominio=$idDominio");
+		if($mech->success())
+		{
+			if($mech->status() == 200)
+			{                          
+                                    $html = $mech->content;
+                                    $mech->update_html( $html );
+                                    my $tree = HTML::TreeBuilder::XPath->new;
+                                    $tree->parse( $html );
+                                    my $respostaDominioInfo = $tree->findnodes( '//body' )->[0]->as_HTML;
+                                    
+                                    my @vetTrata = split(/<td id="inf_url_alt">/, $respostaDominioInfo);
+                                    @vetTrata = split(/target="_blank">/, $vetTrata[1]);
+                                    
+                                    @vetTrata = split(/<\/a><\/td>/, $vetTrata[1]);
+                                    
+                                    my $endereco = $vetTrata[0];
+                                    
+                                    return $endereco;
+				
+                              
+			}
+			elsif($mech->status() == 404)
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "not found",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+                        else
+                        {
+                            %resposta = (
+                                status  => "erro",
+                                resposta =>  "unknow HTTP error",
+                                url =>  $mech->uri(),
+                            );
+                            my $json = \%resposta;
+                            my $json_text = to_json($json, { utf8  => 1 });
+                            return $json_text;
+                        }
+		}
+		
+            }
+            else
+            {
+                %resposta = (
+                    status  => "erro",
+                    resposta =>  "efetue login primeiro",
+                );                
+                my $json = \%resposta;
+                my $json_text = to_json($json, { utf8  => 1 });
+                            
+                return $json_text;
+            }
+        }
+
+       
         sub transfereDominio
         {
             my($self, $ID, $senha, $dominio, $idTec, $dns1, $dns2, $dns3, $dns4) = @_;
@@ -1466,6 +1780,10 @@
             my $idDominio;
             my $idCob;
             
+            if(! defined($idTec))
+            {
+                $idTec = "";
+            }
             if(! defined($dns3))
             {
                 $dns3 = "";
@@ -1477,70 +1795,118 @@
 
                 
             $mech->get("https://registro.br/cgi-bin/nicbr/stini");
+            $mech->submit_form(
+		with_fields => {
+			handle => $ID, # ID
+			passwd => $senha, # senha do ID
+		}
+            );
             if($mech->success())
             {
                 if($mech->status() == 200)
                 {
-                    # form loga no registro
-                    $mech->submit_form(
-                            with_fields => {
-                                    handle => $ID, # ID
-                                    passwd => $senha, # senha do ID
-                            }
-                    );
                     
-                    my @links = $mech->links();
-                    foreach my $link (@links)
-                    {
-                            if($link->text() eq $dominio)
-                            {
-                                    $mech->get("https://registro.br/" . $link->url());
-                                    my @vetId = split(/id\=/, $link->url());
-                                    $idDominio = $vetId[1];
-                            }
-                    }
                     $html = $mech->content;
                     $mech->update_html( $html );
                     my $tree = HTML::TreeBuilder::XPath->new;
                     $tree->parse( $html );
                     my $pagina = $tree->findnodes( '//body' )->[0]->as_HTML;
-                    my @vetPag = split(/name\=\"cob\" id\=\"bil\" value\=\"/, $pagina); #"
-                    @vetPag = split(/\"/, $vetPag[1]); #"
-                    $idCob = $vetPag[0];
-                    $mech->submit_form(
-                            form_id => "domainForm",
-                            fields      => {
-                                    id => $idDominio,
-                                    dominio => $dominio,
-                                    tec => $idTec,
-                                    cob => $idCob,
-                                    host1 => $dns1,
-                                    host2 => $dns2,
-                                    host3 => $dns3,
-                                    host4 => $dns4,
-                            }
-                    );
-                    $html = $mech->content;
-                    $mech->update_html( $html );
-                    $tree = HTML::TreeBuilder::XPath->new;
-                    $tree->parse( $html );
-                    $pagina = $tree->findnodes( '//body' )->[0]->as_HTML;
-                    
-                    #contato técnico inválido
-                    if(index($pagina, "contato") != -1 && index($pagina, "cnico") != -1 && index($pagina, "lido") != -1)
+                    if(index($pagina, "Senha Incorreta") != -1)
                     {
-                        %resposta = (
-                            status  => "erro",
-                            resposta =>  "ID tecnico invalido",
-                        );
-                     }
-                     else
-                     {
-                         %resposta = (
-                            status  => "sucesso",
-                            resposta =>  "dominio transferido",
-                        );
-                     }
+                    	# ==> erro de login
+                    	%resposta = (
+                    		status  => "erro",
+                    		resposta =>  "Erro de login - Senha incorreta",
+                    	);
+                    }
+                    elsif(index($pagina, "ID Inexistente") != -1)
+                    {
+                    	# ==> erro de login
+                    	%resposta = (
+                    		status  => "erro",
+                    		resposta =>  "Erro de login - ID Inexistente",
+                    	);
+                    }
+                    else
+                    {
+                    	# ==> transfere domain
+                    	my $pagina;
+                    	my @links = $mech->links();
+                    	foreach my $link (@links)
+                    	{
+                    		if($link->text() eq $dominio)
+                    		{
+                    			$mech->get("https://registro.br/" . $link->url());
+                    			my @vetId = split(/id\=/, $link->url());
+                    			$idDominio = $vetId[1];                    			
+                    			
+                    			$html = $mech->content;
+                    			$mech->update_html( $html );
+                    			my $tree = HTML::TreeBuilder::XPath->new;
+                    			$tree->parse( $html );
+                    			$pagina = $tree->findnodes( '//body' )->[0]->as_HTML;
+                    			
+                    			my @vetPag = split(/name\=\"cob\" id\=\"bil\" value\=\"/, $pagina); #"
+                    			@vetPag = split(/\"/, $vetPag[1]); #"
+                    			$idCob = $vetPag[0];
+                    			
+                    			my %hashform = (
+                    				id => $idDominio,
+                    				dominio => $dominio,
+                    				tec => $idTec,
+                    				cob => $idCob,
+                    				host1 => $dns1,
+                    				host2 => $dns2,
+                    				host3 => $dns3,
+                    				host4 => $dns4,
+                    			);
+                    			
+                    			$mech->post("https://registro.br/" . $link->url(),  \%hashform);
+                    			
+                    			$html = $mech->content;
+                    			$mech->update_html( $html );
+                    			my $tree = HTML::TreeBuilder::XPath->new;
+                    			$tree->parse( $html );
+                    			$pagina = $tree->findnodes( '//body' )->[0]->as_HTML;                    			
+                    		}
+                    	}
+                    	if(index($pagina, "Contatos de dom") != -1 && index($pagina, "nios") != -1)
+                    	{
+                    		%resposta = (
+                    			status  => "sucesso",
+                    			resposta =>  "Transferência efetuada com sucesso",
+                    		);
+                    	}
+                    	elsif(index($pagina, "Hostname inv") != -1 && index($pagina, "lido") != -1)
+                    	{
+                    		%resposta = (
+                    			status  => "erro",
+                    			resposta =>  "Hostname inválido",
+                    		);
+                    	}
+                    	elsif(index($pagina, "Servidor DNS Slave 1: N") != -1 && index($pagina, "nio j") != -1 && index($pagina, "o informado") != -1)
+                    	{
+                    		%resposta = (
+                    			status  => "erro",
+                    			resposta =>  "Servidor DNS Slave 1: Não informado",
+                    		);
+                    	}
+                    	elsif(index($pagina, "Servidor DNS Master: N") != -1 && index($pagina, "o informado") != -1)
+                    	{
+                    		%resposta = (
+                    			status  => "erro",
+                    			resposta =>  "Servidor DNS Master: Não informado",
+                    		);
+                    	}
+                    	else
+                    	{
+                    		%resposta = (
+                    			status  => "erro",
+                    			resposta =>  "$pagina",
+                    		)
+                    	}
+                    	# ==> transfere domain
+                    }
                     
                     
                                                      
@@ -1588,7 +1954,7 @@ WWW::Kinghost::Painel - Object for hosting automation using Kinghost (www.kingho
 
 =head1 VERSION
 
-0.03
+0.04
 
 =head1 SYNOPSIS
   
@@ -1696,6 +2062,23 @@ WWW::Kinghost::Painel - Object for hosting automation using Kinghost (www.kingho
     # Pega o endereço provisório do domínio
     my $idDominio = "0000000";
     print $painel->pegaServidorTemporario( $idDominio );
+    
+    
+    
+    #Transfere domínio no Registro.br
+    # ID da Entidade dententora do domínio
+    my $ID = "XXXXX"; 
+    # ID da Entidade dententora do domínio
+    my $senha = "XXXX"; 
+    my $dominio = "topjeca.com.br";    
+    # Dominio que você deseja transferir
+    my $idTec = "XXXXX"; # ID da entidade que deseja transferir o contato técnico. deixe em branco caso nao queira transferir o contato técnico
+    # servidores DNS para o qual o domínio será transferido. Só é obrigatório o dns1 e dns2
+    my $dns1 = 'dns1.web2solutions.com.br';
+    my $dns2 = 'dns2.web2solutions.com.br';
+    my $dns3 = 'dns3.web2solutions.com.br';
+    my $dns4 = 'dns4.web2solutions.com.br';
+    print $painel->transfereDominio( $ID, $senha, $dominio, $idTec, $dns1, $dns2, $dns3, $dns4 );
 
     
     
@@ -1909,6 +2292,8 @@ Return JSON
         ,{"quota":"5242880","tipo":"mailbox","caixa":"contato@topjeca.com.br","ocupado":"0"}
         ,{"quota":"1048576","tipo":"mailbox","caixa":"topjeca@topjeca.com.br","ocupado":"0"}
     ],"status":"sucesso"}
+    
+O valor de quota e ocupado é retornado em bytes
 
 
 =head2 importaFTPExterno
@@ -1944,10 +2329,8 @@ Deleta arquivo no FTP
 
 Return JSON
     
-    {"resposta":"Migracao em andamento. Quando a migracao terminar os arquivos estarao em seu site","status":"sucesso"}
-    {"resposta":"Erro de FTP. Verifique as credenciais de acesso ao FTP ou o diretorio alvo no FTP remoto","status":"erro"}
-    {"resposta":"diretorio de origem invalido","status":"erro"}
-    {"resposta":"efetue login primeiro","status":"erro"}
+    {"resposta":"Arquivo nomedoarquivo excluído com sucesso","status":"sucesso"}
+
     
     
 =head2 transfereDominio
@@ -2005,8 +2388,7 @@ See http://dev.perl.org/licenses/ for more information.
 
 =head1 BUGS AND LIMITATIONS
 
-O método novoMySQL nao está funcionando devido a problemas de autenticação nessa página do painel.
-A URL da API referente à este recurso também está com problemas de autenticação
+novoMySQL FIXED
 
 Please report any bugs or feature requests through the web interface at
 <http://rt.cpan.org>.

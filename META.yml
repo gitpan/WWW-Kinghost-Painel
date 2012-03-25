@@ -21,5 +21,6 @@ requires:
   WWW::Mechanize: 0
   strict: 0
   utf8: 0
+  vars: 0
   warnings: 0
-version: 0.03
+version: 0.04

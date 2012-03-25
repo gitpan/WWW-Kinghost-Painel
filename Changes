@@ -15,3 +15,8 @@ History log for WWW::Kinghost::Painel
 
 * New transfereDominio method
 * New deletaArquivoFTP method
+
+# 0.04 - March 13, 2012
+
+* Documentation fixed
+* novoMySQL method fixed
